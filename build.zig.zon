@@ -1,0 +1,24 @@
+.{
+    .name = "kanban",
+    .version = "0.0.0",
+    .minimum_zig_version = "0.13.0",
+    .dependencies = .{
+        .vaxis = .{
+            // .url = "https://github.com/rockorager/libvaxis/archive/refs/tags/v0.5.1.tar.gz",
+            // .hash = "1220de23a3240e503397ea579de4fd85db422f537e10036ef74717c50164475813ce",
+            // .url = "git+https://github.com/rockorager/libvaxis?ref=main#aa6b4e532cac2a129b3d8d4e56ebee3b6ec43f97",
+            // .hash = "12209dab154ac3088838f45d525b6eed54ee4c60e75192492c19d748441d1b5ad6d1",
+            .url = "git+https://github.com/jhickner/libvaxis?ref=app-loop-access#8547bdf5a577d99dd156737ec6d06bbfe392c224",
+            .hash = "1220f239d4d47e6b7fdbc3a7591a8f371e97b9ee29132600a98e0c4857b0d98114bf",
+        },
+        .temp = .{
+            .url = "https://github.com/abhinav/temp.zig/archive/0.3.0.tar.gz",
+            .hash = "122095027cb551451a12706f958487bacc9bec1dfcd8c6bdacff890fb8d641755a58",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
