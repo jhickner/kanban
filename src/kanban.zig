@@ -1,5 +1,4 @@
 const std = @import("std");
-const Array2D = @import("array2d.zig").Array2D;
 const c = @cImport({
     @cInclude("toml.h");
 });
