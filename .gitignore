@@ -4,3 +4,4 @@ zig-out/
 *.out.o
 *.out
 log.txt
+*.toml

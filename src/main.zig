@@ -13,9 +13,11 @@ const Model = struct {
     app: *vxfw.App,
     allocator: std.mem.Allocator,
     unicode_data: *const vaxis.Unicode,
+
+    file_path: []const u8,
     kanban: Kanban,
     col_idx: usize = 0,
-    file_path: []const u8,
+    enable_preview: bool = true,
 
     lists: std.ArrayList(vxfw.ListView),
 
@@ -51,6 +53,10 @@ const Model = struct {
             },
             .key_press => |key| {
                 switch (key.codepoint) {
+                    ' ' => {
+                        self.enable_preview = !self.enable_preview;
+                        return ctx.consumeAndRedraw();
+                    },
                     'q' => ctx.quit = true,
                     'c' => if (key.mods.ctrl) {
                         ctx.quit = true;
@@ -174,9 +180,15 @@ const Model = struct {
         const col_width = @min(25, size.width / self.kanban.columns.items.len);
         var surfaces = std.ArrayList(vxfw.SubSurface).init(ctx.arena);
 
+        // force preview disable for small screens
+        if (size.height < 25) self.enable_preview = false;
+
+        const preview_y = 12;
+        const list_height = if (self.enable_preview) preview_y else size.height -| 2;
+
         for (self.kanban.columns.items, 0..) |col, idx| {
             // headers
-            const text = vxfw.Text{
+            const header_text = vxfw.Text{
                 .text = col.title,
                 .style = if (idx == self.col_idx)
                     .{ .fg = .{ .rgb = [_]u8{ 255, 255, 255 } } }
@@ -185,7 +197,7 @@ const Model = struct {
             };
             try surfaces.append(.{
                 .origin = .{ .row = 0, .col = @intCast(idx * col_width) },
-                .surface = try text.draw(ctx.withConstraints(
+                .surface = try header_text.draw(ctx.withConstraints(
                     ctx.min,
                     .{ .width = col_width, .height = 1 },
                 )),
@@ -198,9 +210,32 @@ const Model = struct {
                     .origin = .{ .row = 2, .col = @intCast(idx * col_width) },
                     .surface = try self.lists.items[idx].draw(ctx.withConstraints(
                         ctx.min,
-                        .{ .width = col_width, .height = size.height -| 2 },
+                        .{ .width = col_width, .height = list_height },
                     )),
                 });
+            }
+
+            // preview
+            if (self.enable_preview) {
+                var current_col = &self.kanban.columns.items[self.col_idx];
+                const cursor = self.lists.items[self.col_idx].cursor;
+                const card = &current_col.cards.items[cursor];
+                if (card.desc) |desc| {
+                    const bar_chars = try ctx.arena.alloc(u8, size.width);
+                    @memset(bar_chars, '-');
+
+                    const bar = vxfw.Text{ .text = bar_chars };
+                    try surfaces.append(.{
+                        .origin = .{ .row = preview_y + 1, .col = 0 },
+                        .surface = try bar.draw(ctx),
+                    });
+
+                    const desc_text = vxfw.Text{ .text = desc };
+                    try surfaces.append(.{
+                        .origin = .{ .row = preview_y + 2, .col = 0 },
+                        .surface = try desc_text.draw(ctx),
+                    });
+                }
             }
         }
 

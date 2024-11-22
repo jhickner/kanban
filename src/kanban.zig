@@ -76,7 +76,7 @@ pub const Kanban = struct {
 fn write_card(card: *Card, idx: usize, writer: anytype) !void {
     try writer.print("title = \"{s}\"\n", .{card.title});
     if (card.desc) |desc| {
-        try writer.print("desc = \"\"\"{s}\"\"\"\n", .{desc});
+        try writer.print("desc = \"\"\"\n{s}\"\"\"\n", .{desc});
     }
     if (card.link) |link| {
         try writer.print("link = \"{s}\"\n", .{link});
@@ -96,7 +96,7 @@ fn write_kanban(kanban: *Kanban, writer: anytype) !void {
             try writer.writeAll("[[card]]\n");
             try writer.print("title = \"{s}\"\n", .{card.title});
             if (card.desc) |desc| {
-                try writer.print("desc = \"\"\"{s}\"\"\"\n", .{desc});
+                try writer.print("desc = \"\"\"\n{s}\"\"\"\n", .{desc});
             }
             if (card.link) |link| {
                 try writer.print("link = \"{s}\"\n", .{link});

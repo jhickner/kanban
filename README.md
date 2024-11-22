@@ -10,4 +10,5 @@ e              edit the .toml file backing the board
 ctrl-s         save
 enter          if "link" is defined for the current card, open it
 q              quit
+space          toggle preview pane (shows desc field)
 ```
