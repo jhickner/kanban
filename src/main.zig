@@ -91,6 +91,7 @@ const Model = struct {
 
     fn tryOpenLink(self: *Model) !void {
         var col = &self.kanban.columns.items[self.col_idx];
+        if (col.cards.items.len == 0) return;
         const card = &col.cards.items[self.lists.items[self.col_idx].cursor];
         if (card.link) |link| {
             const args = [_][]const u8{ "open", link };
@@ -102,6 +103,7 @@ const Model = struct {
     fn moveCardLeft(self: *Model, ctx: *vxfw.EventContext) !void {
         if (self.col_idx > 0) {
             var col = &self.kanban.columns.items[self.col_idx];
+            if (col.cards.items.len == 0) return;
             const card = col.cards.orderedRemove(self.lists.items[self.col_idx].cursor);
             col = &self.kanban.columns.items[self.col_idx - 1];
             try col.cards.insert(0, card);
@@ -112,6 +114,7 @@ const Model = struct {
     fn moveCardRight(self: *Model, ctx: *vxfw.EventContext) !void {
         if (self.col_idx < self.lists.items.len - 1) {
             var col = &self.kanban.columns.items[self.col_idx];
+            if (col.cards.items.len == 0) return;
             const card = col.cards.orderedRemove(self.lists.items[self.col_idx].cursor);
             col = &self.kanban.columns.items[self.col_idx + 1];
             try col.cards.insert(0, card);
@@ -121,6 +124,7 @@ const Model = struct {
 
     fn moveCardUp(self: *Model, ctx: *vxfw.EventContext) !void {
         var col = &self.kanban.columns.items[self.col_idx];
+        if (col.cards.items.len == 0) return;
         const cursor = self.lists.items[self.col_idx].cursor;
         if (cursor > 0) {
             const card = col.cards.orderedRemove(cursor);
@@ -132,6 +136,7 @@ const Model = struct {
 
     fn moveCardDown(self: *Model, ctx: *vxfw.EventContext) !void {
         var col = &self.kanban.columns.items[self.col_idx];
+        if (col.cards.items.len == 0) return;
         const cursor = self.lists.items[self.col_idx].cursor;
         if (cursor < col.cards.items.len - 1) {
             const card = col.cards.orderedRemove(cursor);
@@ -218,23 +223,29 @@ const Model = struct {
             // preview
             if (self.enable_preview) {
                 var current_col = &self.kanban.columns.items[self.col_idx];
-                const cursor = self.lists.items[self.col_idx].cursor;
-                const card = &current_col.cards.items[cursor];
-                if (card.desc) |desc| {
-                    const bar_chars = try ctx.arena.alloc(u8, size.width);
-                    @memset(bar_chars, '-');
+                if (current_col.cards.items.len > 0) {
+                    const cursor = self.lists.items[self.col_idx].cursor;
+                    const card = &current_col.cards.items[cursor];
+                    if (card.desc != null or card.link != null) {
+                        var copy = std.ArrayList(u8).init(ctx.arena);
+                        try copy.appendNTimes('-', size.width);
+                        try copy.append('\n');
 
-                    const bar = vxfw.Text{ .text = bar_chars };
-                    try surfaces.append(.{
-                        .origin = .{ .row = preview_y + 1, .col = 0 },
-                        .surface = try bar.draw(ctx),
-                    });
+                        if (card.desc) |desc| {
+                            try copy.appendSlice(desc);
+                            try copy.append('\n');
+                        }
 
-                    const desc_text = vxfw.Text{ .text = desc };
-                    try surfaces.append(.{
-                        .origin = .{ .row = preview_y + 2, .col = 0 },
-                        .surface = try desc_text.draw(ctx),
-                    });
+                        if (card.link) |link| {
+                            try copy.appendSlice(link);
+                        }
+
+                        const desc_text = vxfw.Text{ .text = copy.items };
+                        try surfaces.append(.{
+                            .origin = .{ .row = preview_y + 1, .col = 0 },
+                            .surface = try desc_text.draw(ctx),
+                        });
+                    }
                 }
             }
         }
@@ -244,7 +255,7 @@ const Model = struct {
             .widget = self.widget(),
             .focusable = true,
             .buffer = &.{},
-            .children = try surfaces.toOwnedSlice(),
+            .children = surfaces.items,
         };
     }
 
