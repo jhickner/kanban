@@ -15,12 +15,6 @@ pub fn build(b: *std.Build) void {
     });
     exe.root_module.addImport("vaxis", vaxis_dep.module("vaxis"));
 
-    const temp = b.dependency("temp", .{
-        .target = target,
-        .optimize = optimize,
-    });
-    exe.root_module.addImport("temp", temp.module("temp"));
-
     exe.addCSourceFile(.{ .file = b.path("tomlc/toml.c") });
     exe.addIncludePath(b.path("tomlc/"));
 

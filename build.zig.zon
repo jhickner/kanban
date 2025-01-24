@@ -1,15 +1,11 @@
 .{
     .name = "kanban",
     .version = "0.0.0",
-    .minimum_zig_version = "0.13.0",
+    .minimum_zig_version = "0.14.0",
     .dependencies = .{
         .vaxis = .{
-            .url = "git+https://github.com/jhickner/libvaxis?ref=app-loop-access#8547bdf5a577d99dd156737ec6d06bbfe392c224",
-            .hash = "1220f239d4d47e6b7fdbc3a7591a8f371e97b9ee29132600a98e0c4857b0d98114bf",
-        },
-        .temp = .{
-            .url = "https://github.com/abhinav/temp.zig/archive/0.3.0.tar.gz",
-            .hash = "122095027cb551451a12706f958487bacc9bec1dfcd8c6bdacff890fb8d641755a58",
+            .url = "git+https://github.com/jhickner/libvaxis?ref=zig-0.14.0#6bb24e8f03d497032403405875be917483dd8e41",
+            .hash = "1220b34f880a3cf3246f29748e861591353d1a033849b3beef3b0a8b3fe45ecf6bbc",
         },
     },
     .paths = .{

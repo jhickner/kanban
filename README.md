@@ -1,7 +1,7 @@
 # kanban
 
-Very simple terminal kanban board.
-All board editing besides moving cards around happens in `$EDITOR`.
+Very simple terminal kanban board backed by a toml file.
+Cards can be moved between columns, all other editing happens in your editor.
 
 ```
 arrows         move around between cards/columns

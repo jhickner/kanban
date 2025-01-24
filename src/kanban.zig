@@ -3,8 +3,6 @@ const c = @cImport({
     @cInclude("toml.h");
 });
 
-// TODO: cleanup and safety
-
 pub const Card = struct {
     title: []const u8,
     desc: ?[]const u8,
@@ -114,10 +112,9 @@ fn c_parse_kanban(kanban: *Kanban, path: []const u8) !void {
         return;
     }
 
-    var buffer: [200]u8 = undefined;
-    const errbuf = buffer[0..];
+    var errbuf: [200]u8 = [_]u8{0} ** 200;
 
-    const conf = c.toml_parse_file(fp, @ptrCast(errbuf.ptr), errbuf.len);
+    const conf = c.toml_parse_file(fp, errbuf[0..].ptr, errbuf.len);
     defer c.toml_free(conf);
     if (conf == null) {
         std.debug.print("couldn't parse file: {s}\n", .{errbuf});

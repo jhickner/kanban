@@ -2,12 +2,9 @@ const std = @import("std");
 const vaxis = @import("vaxis");
 const vxfw = vaxis.vxfw;
 const Key = vaxis.Key;
-const editor = @import("editor.zig");
 const kanban = @import("kanban.zig");
 const Kanban = kanban.Kanban;
 const Card = kanban.Card;
-
-pub const panic = vaxis.panic_handler;
 
 const Model = struct {
     app: *vxfw.App,
@@ -72,7 +69,7 @@ const Model = struct {
                     },
                     'e' => {
                         self.stopLoop();
-                        try editor.edit(self.allocator, self.file_path);
+                        try edit(self.allocator, self.file_path);
                         try self.load_file(self.file_path);
                         try self.startLoop();
                         return ctx.consumeEvent();
@@ -188,7 +185,7 @@ const Model = struct {
         // force preview disable for small screens
         if (size.height < 25) self.enable_preview = false;
 
-        const preview_y = 12;
+        const preview_y = 16;
         const list_height = if (self.enable_preview) preview_y else size.height -| 2;
 
         for (self.kanban.columns.items, 0..) |col, idx| {
@@ -302,7 +299,6 @@ const ListData = struct {
 fn cardWidget(card: *kanban.Card) vxfw.Widget {
     return .{
         .userdata = card,
-        .eventHandler = vxfw.noopEventHandler,
         .drawFn = cardWidgetDrawFn,
     };
 }
@@ -331,14 +327,31 @@ fn initTemplate(file_path: []const u8) !void {
 
 const template =
     \\columns = [
-    \\  "Column 1"
+    \\  # add more column here
+    \\  "Column 1",
+    \\  "Column 2"
     \\]
     \\
     \\[[card]]
-    \\title = "Press e to edit\nthe board"
+    \\title = "This is a card.\nCard titles can be long."
     \\column = 0
-    \\#link = "http://www.google.com/"
-    \\#desc = """a possibly multiline description"""
+    \\link = "http://www.google.com/"
+    \\desc = """
+    \\This is the card description.
+    \\Press 'e' to edit the card in your editor. ($EDITOR env var)
+    \\Save and exit to return to the board.
+    \\
+    \\- Press 'space' to toggle the description pane.
+    \\- Navigate the board with arrow keys.
+    \\- Move cards by holding shift + arrow keys.
+    \\- Press 'enter' on a card to navigate to the link URL (if set)
+    \\- Ctrl-s to save the board.
+    \\- 'q' to quit
+    \\"""
+    \\
+    \\[[card]]
+    \\title = "This is another card."
+    \\column = 0
 ;
 
 fn usage() void {
@@ -349,7 +362,6 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer {
         const deinit_status = gpa.deinit();
-        //fail test; can't try in defer as defer is executed after we return
         if (deinit_status == .leak) {
             std.log.err("memory leak", .{});
         }
@@ -387,6 +399,27 @@ pub fn main() !void {
 
     try app.run(model.widget(), .{});
     app.deinit();
+}
+
+pub fn edit(
+    alloc: std.mem.Allocator,
+    file_path: []const u8,
+) !void {
+    const editor = std.process.getEnvVarOwned(alloc, "EDITOR") catch |err| switch (err) {
+        error.EnvironmentVariableNotFound => try alloc.dupe(u8, "nvim"),
+        else => return err,
+    };
+    defer alloc.free(editor);
+
+    var child = std.process.Child.init(&.{ editor, file_path }, alloc);
+    _ = try child.spawnAndWait();
+}
+
+fn freeListUserData(self: *Model) void {
+    for (self.lists.items) |list| {
+        const list_data: *const ListData = @ptrCast(@alignCast(list.children.builder.userdata));
+        self.allocator.destroy(list_data);
+    }
 }
 
 test {
