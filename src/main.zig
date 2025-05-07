@@ -19,11 +19,11 @@ const Model = struct {
     lists: std.ArrayList(vxfw.ListView),
 
     pub fn stopLoop(self: *Model) void {
-        if (self.app.loop) |*loop| loop.stop();
+        self.app.loop.stop();
     }
 
     pub fn startLoop(self: *Model) !void {
-        if (self.app.loop) |*loop| try loop.start();
+        try self.app.loop.start();
     }
 
     pub fn widget(self: *Model) vxfw.Widget {
@@ -65,6 +65,14 @@ const Model = struct {
                     },
                     Key.enter => {
                         try self.tryOpenLink();
+                        return ctx.consumeEvent();
+                    },
+                    'n' => {
+                        try insertCard(self.file_path, self.col_idx);
+                        self.stopLoop();
+                        try edit(self.allocator, self.file_path);
+                        try self.load_file(self.file_path);
+                        try self.startLoop();
                         return ctx.consumeEvent();
                     },
                     'e' => {
@@ -154,7 +162,9 @@ const Model = struct {
             col.draw_cursor = true;
             col.cursor = 0;
 
-            try ctx.requestFocus(col.widget());
+            if (self.kanban.columns.items[self.col_idx].cards.items.len > 0) {
+                try ctx.requestFocus(col.widget());
+            }
             return ctx.consumeAndRedraw();
         }
     }
@@ -170,7 +180,9 @@ const Model = struct {
             col.draw_cursor = true;
             col.cursor = 0;
 
-            try ctx.requestFocus(col.widget());
+            if (self.kanban.columns.items[self.col_idx].cards.items.len > 0) {
+                try ctx.requestFocus(col.widget());
+            }
             return ctx.consumeAndRedraw();
         }
     }
@@ -207,15 +219,15 @@ const Model = struct {
 
             // lists
             // don't render list if it's empty
-            if (self.kanban.columns.items[idx].cards.items.len > 0) {
-                try surfaces.append(.{
-                    .origin = .{ .row = 2, .col = @intCast(idx * col_width) },
-                    .surface = try self.lists.items[idx].draw(ctx.withConstraints(
-                        ctx.min,
-                        .{ .width = col_width, .height = list_height },
-                    )),
-                });
-            }
+            //if (self.kanban.columns.items[idx].cards.items.len > 0) {
+            try surfaces.append(.{
+                .origin = .{ .row = 2, .col = @intCast(idx * col_width) },
+                .surface = try self.lists.items[idx].draw(ctx.withConstraints(
+                    ctx.min,
+                    .{ .width = col_width, .height = list_height },
+                )),
+            });
+            //}
 
             // preview
             if (self.enable_preview) {
@@ -250,7 +262,6 @@ const Model = struct {
         return .{
             .size = ctx.max.size(),
             .widget = self.widget(),
-            .focusable = true,
             .buffer = &.{},
             .children = surfaces.items,
         };
@@ -311,21 +322,7 @@ fn cardWidgetDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Er
     return try text.draw(ctx);
 }
 
-// Init the file with a template if it doesn't exist
-fn initTemplate(file_path: []const u8) !void {
-    const file = std.fs.cwd().openFile(file_path, .{}) catch |err| switch (err) {
-        error.FileNotFound => {
-            const file_new = try std.fs.cwd().createFile(file_path, .{});
-            try file_new.writeAll(template);
-            file_new.close();
-            return;
-        },
-        else => return err,
-    };
-    file.close();
-}
-
-const template =
+const NEW_TEMPLATE =
     \\columns = [
     \\  # add more column here
     \\  "Column 1",
@@ -352,6 +349,14 @@ const template =
     \\[[card]]
     \\title = "This is another card."
     \\column = 0
+;
+
+const NEW_CARD =
+    \\
+    \\
+    \\[[card]]
+    \\title = "new card"
+    \\column = {d}
 ;
 
 fn usage() void {
@@ -413,6 +418,28 @@ pub fn edit(
 
     var child = std.process.Child.init(&.{ editor, file_path }, alloc);
     _ = try child.spawnAndWait();
+}
+
+/// insert a new card in the currently selected column
+fn insertCard(file_path: []const u8, col_idx: usize) !void {
+    const file = try std.fs.cwd().openFile(file_path, .{ .mode = .read_write });
+    defer file.close();
+    try file.seekFromEnd(0);
+    try std.fmt.format(file.writer(), NEW_CARD, .{col_idx});
+}
+
+// Init the file with a template if it doesn't exist
+fn initTemplate(file_path: []const u8) !void {
+    const file = std.fs.cwd().openFile(file_path, .{}) catch |err| switch (err) {
+        error.FileNotFound => {
+            const file_new = try std.fs.cwd().createFile(file_path, .{});
+            try file_new.writeAll(NEW_TEMPLATE);
+            file_new.close();
+            return;
+        },
+        else => return err,
+    };
+    file.close();
 }
 
 fn freeListUserData(self: *Model) void {
