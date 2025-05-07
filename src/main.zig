@@ -6,6 +6,13 @@ const kanban = @import("kanban.zig");
 const Kanban = kanban.Kanban;
 const Card = kanban.Card;
 
+const Direction = enum {
+    left,
+    right,
+    up,
+    down,
+};
+
 const Model = struct {
     app: *vxfw.App,
     allocator: std.mem.Allocator,
@@ -69,29 +76,30 @@ const Model = struct {
                     },
                     'n' => {
                         try insertCard(self.file_path, self.col_idx);
-                        self.stopLoop();
-                        try edit(self.allocator, self.file_path);
-                        try self.load_file(self.file_path);
-                        try self.startLoop();
+                        try self.editFile();
                         return ctx.consumeEvent();
                     },
                     'e' => {
-                        self.stopLoop();
-                        try edit(self.allocator, self.file_path);
-                        try self.load_file(self.file_path);
-                        try self.startLoop();
+                        try self.editFile();
                         return ctx.consumeEvent();
                     },
-                    Key.left => if (key.mods.shift) try self.moveCardLeft(ctx) else try self.colLeft(ctx),
-                    Key.right => if (key.mods.shift) try self.moveCardRight(ctx) else try self.colRight(ctx),
-                    Key.up => if (key.mods.shift) try self.moveCardUp(ctx) else {},
-                    Key.down => if (key.mods.shift) try self.moveCardDown(ctx) else {},
+                    Key.left => if (key.mods.shift) try self.moveCard(ctx, .left) else try self.navigateColumn(ctx, .left),
+                    Key.right => if (key.mods.shift) try self.moveCard(ctx, .right) else try self.navigateColumn(ctx, .right),
+                    Key.up => if (key.mods.shift) try self.moveCard(ctx, .up) else {},
+                    Key.down => if (key.mods.shift) try self.moveCard(ctx, .down) else {},
                     else => {},
                 }
                 //
             },
             else => {},
         }
+    }
+
+    fn editFile(self: *Model) !void {
+        self.stopLoop();
+        try edit(self.allocator, self.file_path);
+        try self.load_file(self.file_path);
+        try self.startLoop();
     }
 
     fn tryOpenLink(self: *Model) !void {
@@ -105,76 +113,63 @@ const Model = struct {
         }
     }
 
-    fn moveCardLeft(self: *Model, ctx: *vxfw.EventContext) !void {
-        if (self.col_idx > 0) {
-            var col = &self.kanban.columns.items[self.col_idx];
-            if (col.cards.items.len == 0) return;
-            const card = col.cards.orderedRemove(self.lists.items[self.col_idx].cursor);
-            col = &self.kanban.columns.items[self.col_idx - 1];
-            try col.cards.insert(0, card);
-            try self.colLeft(ctx);
-        }
-    }
-
-    fn moveCardRight(self: *Model, ctx: *vxfw.EventContext) !void {
-        if (self.col_idx < self.lists.items.len - 1) {
-            var col = &self.kanban.columns.items[self.col_idx];
-            if (col.cards.items.len == 0) return;
-            const card = col.cards.orderedRemove(self.lists.items[self.col_idx].cursor);
-            col = &self.kanban.columns.items[self.col_idx + 1];
-            try col.cards.insert(0, card);
-            try self.colRight(ctx);
-        }
-    }
-
-    fn moveCardUp(self: *Model, ctx: *vxfw.EventContext) !void {
+    fn moveCard(self: *Model, ctx: *vxfw.EventContext, direction: Direction) !void {
         var col = &self.kanban.columns.items[self.col_idx];
         if (col.cards.items.len == 0) return;
         const cursor = self.lists.items[self.col_idx].cursor;
-        if (cursor > 0) {
-            const card = col.cards.orderedRemove(cursor);
-            try col.cards.insert(cursor - 1, card);
-            self.lists.items[self.col_idx].cursor -= 1;
-            return ctx.consumeAndRedraw();
+
+        switch (direction) {
+            .left => {
+                if (self.col_idx > 0) {
+                    const card = col.cards.orderedRemove(cursor);
+                    col = &self.kanban.columns.items[self.col_idx - 1];
+                    try col.cards.insert(0, card);
+                    try self.navigateColumn(ctx, .left);
+                }
+            },
+            .right => {
+                if (self.col_idx < self.lists.items.len - 1) {
+                    const card = col.cards.orderedRemove(cursor);
+                    col = &self.kanban.columns.items[self.col_idx + 1];
+                    try col.cards.insert(0, card);
+                    try self.navigateColumn(ctx, .right);
+                }
+            },
+            .up => {
+                if (cursor > 0) {
+                    const card = col.cards.orderedRemove(cursor);
+                    try col.cards.insert(cursor - 1, card);
+                    self.lists.items[self.col_idx].cursor -= 1;
+                    return ctx.consumeAndRedraw();
+                }
+            },
+            .down => {
+                if (cursor < col.cards.items.len - 1) {
+                    const card = col.cards.orderedRemove(cursor);
+                    try col.cards.insert(cursor + 1, card);
+                    self.lists.items[self.col_idx].cursor += 1;
+                    return ctx.consumeAndRedraw();
+                }
+            },
         }
     }
 
-    fn moveCardDown(self: *Model, ctx: *vxfw.EventContext) !void {
-        var col = &self.kanban.columns.items[self.col_idx];
-        if (col.cards.items.len == 0) return;
-        const cursor = self.lists.items[self.col_idx].cursor;
-        if (cursor < col.cards.items.len - 1) {
-            const card = col.cards.orderedRemove(cursor);
-            try col.cards.insert(cursor + 1, card);
-            self.lists.items[self.col_idx].cursor += 1;
-            return ctx.consumeAndRedraw();
-        }
-    }
+    fn navigateColumn(self: *Model, ctx: *vxfw.EventContext, direction: Direction) !void {
+        const can_move = switch (direction) {
+            .left => self.col_idx > 0,
+            .right => self.col_idx < self.lists.items.len - 1,
+            else => false, // up/down aren't valid for column navigation
+        };
 
-    fn colLeft(self: *Model, ctx: *vxfw.EventContext) !void {
-        if (self.col_idx > 0) {
+        if (can_move) {
             var col = &self.lists.items[self.col_idx];
             col.draw_cursor = false;
 
-            self.col_idx -= 1;
-
-            col = &self.lists.items[self.col_idx];
-            col.draw_cursor = true;
-            col.cursor = 0;
-
-            if (self.kanban.columns.items[self.col_idx].cards.items.len > 0) {
-                try ctx.requestFocus(col.widget());
+            switch (direction) {
+                .left => self.col_idx -= 1,
+                .right => self.col_idx += 1,
+                else => {},
             }
-            return ctx.consumeAndRedraw();
-        }
-    }
-
-    fn colRight(self: *Model, ctx: *vxfw.EventContext) !void {
-        if (self.col_idx < self.lists.items.len - 1) {
-            var col = &self.lists.items[self.col_idx];
-            col.draw_cursor = false;
-
-            self.col_idx += 1;
 
             col = &self.lists.items[self.col_idx];
             col.draw_cursor = true;
@@ -440,13 +435,6 @@ fn initTemplate(file_path: []const u8) !void {
         else => return err,
     };
     file.close();
-}
-
-fn freeListUserData(self: *Model) void {
-    for (self.lists.items) |list| {
-        const list_data: *const ListData = @ptrCast(@alignCast(list.children.builder.userdata));
-        self.allocator.destroy(list_data);
-    }
 }
 
 test {
