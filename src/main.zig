@@ -101,6 +101,10 @@ const Model = struct {
                         try self.editFile();
                         return ctx.consumeEvent();
                     },
+                    'x' => {
+                        try self.deleteCard(ctx);
+                        return ctx.consumeAndRedraw();
+                    },
                     Key.left => if (key.mods.shift) try self.moveCard(ctx, .left) else try self.navigateColumn(ctx, .left),
                     Key.right => if (key.mods.shift) try self.moveCard(ctx, .right) else try self.navigateColumn(ctx, .right),
                     Key.up => if (key.mods.shift) try self.moveCard(ctx, .up) else {},
@@ -170,6 +174,25 @@ const Model = struct {
                 }
             },
         }
+    }
+
+    fn deleteCard(self: *Model, _: *vxfw.EventContext) !void {
+        var col = &self.kanban.columns.items[self.col_idx];
+        // If there are no cards in this column, nothing to delete
+        if (col.cards.items.len == 0) return;
+
+        const cursor = self.lists.items[self.col_idx].cursor;
+        // Remove the card at the current cursor position
+        var card = col.cards.orderedRemove(cursor);
+        card.deinit(self.allocator);
+
+        // Adjust cursor if needed (if we deleted the last card)
+        if (cursor >= col.cards.items.len and col.cards.items.len > 0) {
+            self.lists.items[self.col_idx].cursor = @intCast(col.cards.items.len - 1);
+        }
+
+        // Save the changes
+        //try self.kanban.write_file(self.file_path);
     }
 
     fn navigateColumn(self: *Model, ctx: *vxfw.EventContext, direction: Direction) !void {
@@ -556,6 +579,7 @@ const NEW_TEMPLATE =
     \\- Navigate the board with arrow keys.
     \\- Move cards by holding shift + arrow keys.
     \\- Press 'enter' on a card to navigate to the link URL (if set)
+    \\- Press 'x' to delete the currently selected card.
     \\- Ctrl-s to save the board.
     \\- 'q' to quit
     \\"""
