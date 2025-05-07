@@ -191,7 +191,11 @@ const Model = struct {
         const self: *Model = @ptrCast(@alignCast(ptr));
 
         const size = ctx.max.size();
-        const col_width = @min(25, size.width / self.kanban.columns.items.len);
+        // Adjust column width to account for spacing
+        const spacing = 1; // Add 1 space between columns
+        const total_spacing = spacing * (self.kanban.columns.items.len - 1);
+        const total_available_width = if (size.width > total_spacing) size.width - total_spacing else size.width;
+        const col_width = @min(25, total_available_width / self.kanban.columns.items.len);
         var surfaces = std.ArrayList(vxfw.SubSurface).init(ctx.arena);
 
         // force preview disable for small screens
@@ -210,7 +214,7 @@ const Model = struct {
                     .{},
             };
             try surfaces.append(.{
-                .origin = .{ .row = 0, .col = @intCast(idx * col_width) },
+                .origin = .{ .row = 0, .col = @intCast(idx * (col_width + spacing)) },
                 .surface = try header_text.draw(ctx.withConstraints(
                     ctx.min,
                     .{ .width = col_width, .height = 1 },
@@ -221,7 +225,7 @@ const Model = struct {
             // don't render list if it's empty
             //if (self.kanban.columns.items[idx].cards.items.len > 0) {
             try surfaces.append(.{
-                .origin = .{ .row = 2, .col = @intCast(idx * col_width) },
+                .origin = .{ .row = 2, .col = @intCast(idx * (col_width + spacing)) },
                 .surface = try self.lists.items[idx].draw(ctx.withConstraints(
                     ctx.min,
                     .{ .width = col_width, .height = list_height },
