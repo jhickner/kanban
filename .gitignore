@@ -5,3 +5,5 @@ zig-out/
 *.out
 log.txt
 *.toml
+
+**/.claude/settings.local.json

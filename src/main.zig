@@ -2,6 +2,7 @@ const std = @import("std");
 const vaxis = @import("vaxis");
 const vxfw = vaxis.vxfw;
 const Key = vaxis.Key;
+const Border = vxfw.Border;
 const kanban = @import("kanban.zig");
 const Kanban = kanban.Kanban;
 const Card = kanban.Card;
@@ -46,7 +47,15 @@ const Model = struct {
 
         if (self.col_idx >= self.model.kanban.columns.items.len) return null;
         if (idx >= self.model.kanban.columns.items[self.col_idx].cards.items.len) return null;
-        return cardWidget(&self.model.kanban.columns.items[self.col_idx].cards.items[idx]);
+        
+        // Check if this card is selected (current column and item at cursor position)
+        const is_selected = (self.col_idx == self.model.col_idx) and 
+                            (idx == self.model.lists.items[self.col_idx].cursor);
+        
+        return cardWidget(
+            &self.model.kanban.columns.items[self.col_idx].cards.items[idx],
+            is_selected
+        );
     }
 
     fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.Event) anyerror!void {
@@ -162,17 +171,13 @@ const Model = struct {
         };
 
         if (can_move) {
-            var col = &self.lists.items[self.col_idx];
-            col.draw_cursor = false;
-
             switch (direction) {
                 .left => self.col_idx -= 1,
                 .right => self.col_idx += 1,
                 else => {},
             }
 
-            col = &self.lists.items[self.col_idx];
-            col.draw_cursor = true;
+            var col = &self.lists.items[self.col_idx];
             col.cursor = 0;
 
             if (self.kanban.columns.items[self.col_idx].cards.items.len > 0) {
@@ -274,7 +279,7 @@ const Model = struct {
             const data = try self.allocator.create(ListData);
             data.* = .{ .col_idx = idx, .model = self };
             try self.lists.append(.{
-                .draw_cursor = (idx == 0),
+                .draw_cursor = false, // Disable the default cursor indicator
                 .children = .{ .builder = .{
                     .buildFn = Model.listWidgetBuilder,
                     .userdata = data,
@@ -302,19 +307,55 @@ const ListData = struct {
     model: *Model,
 };
 
-fn cardWidget(card: *kanban.Card) vxfw.Widget {
-    return .{
-        .userdata = card,
-        .drawFn = cardWidgetDrawFn,
-    };
+fn cardWidget(card: *kanban.Card, is_selected: bool) vxfw.Widget {
+    if (is_selected) {
+        return .{
+            .userdata = card,
+            .drawFn = selectedCardWidgetDrawFn,
+        };
+    } else {
+        return .{
+            .userdata = card,
+            .drawFn = cardWidgetDrawFn,
+        };
+    }
 }
 
 fn cardWidgetDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Error!vxfw.Surface {
-    const self: *Card = @ptrCast(@alignCast(ptr));
+    const card: *Card = @ptrCast(@alignCast(ptr));
+    
+    // Create the text widget for the card content
     const text = vxfw.Text{
-        .text = try std.fmt.allocPrint(ctx.arena, "{s}\n", .{self.title}),
+        .text = try std.fmt.allocPrint(ctx.arena, "{s}\n", .{card.title}),
     };
-    return try text.draw(ctx);
+    
+    // Create a border with default style
+    const border = Border{
+        .child = text.widget(),
+        .style = .{}, // Default style
+    };
+    
+    // Draw the bordered text
+    return try border.draw(ctx);
+}
+
+fn selectedCardWidgetDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Error!vxfw.Surface {
+    const card: *Card = @ptrCast(@alignCast(ptr));
+    
+    // Create the text widget for the card content with bright white text
+    const text = vxfw.Text{
+        .text = try std.fmt.allocPrint(ctx.arena, "{s}\n", .{card.title}),
+        .style = .{ .fg = .{ .rgb = [_]u8{ 255, 255, 255 } } }, // Bright white text
+    };
+    
+    // Create a border with bright white style for selected items
+    const border = Border{
+        .child = text.widget(),
+        .style = .{ .fg = .{ .rgb = [_]u8{ 255, 255, 255 } } }, // Bright white border
+    };
+    
+    // Draw the bordered text
+    return try border.draw(ctx);
 }
 
 const NEW_TEMPLATE =
