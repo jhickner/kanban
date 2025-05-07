@@ -3,6 +3,7 @@ const vaxis = @import("vaxis");
 const vxfw = vaxis.vxfw;
 const Key = vaxis.Key;
 const Border = vxfw.Border;
+const TextField = vxfw.TextField;
 const kanban = @import("kanban.zig");
 const Kanban = kanban.Kanban;
 const Card = kanban.Card;
@@ -23,6 +24,10 @@ const Model = struct {
     kanban: Kanban,
     col_idx: usize = 0,
     enable_preview: bool = true,
+
+    // New card dialog state
+    show_new_card_dialog: bool = false,
+    new_card_dialog: ?*NewCardDialog = null,
 
     lists: std.ArrayList(vxfw.ListView),
 
@@ -47,15 +52,12 @@ const Model = struct {
 
         if (self.col_idx >= self.model.kanban.columns.items.len) return null;
         if (idx >= self.model.kanban.columns.items[self.col_idx].cards.items.len) return null;
-        
+
         // Check if this card is selected (current column and item at cursor position)
-        const is_selected = (self.col_idx == self.model.col_idx) and 
-                            (idx == self.model.lists.items[self.col_idx].cursor);
-        
-        return cardWidget(
-            &self.model.kanban.columns.items[self.col_idx].cards.items[idx],
-            is_selected
-        );
+        const is_selected = (self.col_idx == self.model.col_idx) and
+            (idx == self.model.lists.items[self.col_idx].cursor);
+
+        return cardWidget(&self.model.kanban.columns.items[self.col_idx].cards.items[idx], is_selected);
     }
 
     fn typeErasedEventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.Event) anyerror!void {
@@ -84,9 +86,16 @@ const Model = struct {
                         return ctx.consumeEvent();
                     },
                     'n' => {
-                        try insertCard(self.file_path, self.col_idx);
-                        try self.editFile();
-                        return ctx.consumeEvent();
+                        // Create and show the new card dialog
+                        if (self.new_card_dialog == null) {
+                            const dialog = try self.allocator.create(NewCardDialog);
+                            dialog.* = try NewCardDialog.init(self);
+                            self.new_card_dialog = dialog;
+                        }
+
+                        self.show_new_card_dialog = true;
+                        try ctx.requestFocus(self.new_card_dialog.?.widget());
+                        return ctx.consumeAndRedraw();
                     },
                     'e' => {
                         try self.editFile();
@@ -198,6 +207,17 @@ const Model = struct {
         const col_width = @min(25, total_available_width / self.kanban.columns.items.len);
         var surfaces = std.ArrayList(vxfw.SubSurface).init(ctx.arena);
 
+        // If we're showing the dialog, create it on-demand if needed
+        if (self.show_new_card_dialog) {
+            if (self.new_card_dialog == null) {
+                const dialog = try self.allocator.create(NewCardDialog);
+                dialog.* = try NewCardDialog.init(self);
+                self.new_card_dialog = dialog;
+            }
+
+            // Dialog will be drawn on top
+        }
+
         // force preview disable for small screens
         if (size.height < 25) self.enable_preview = false;
 
@@ -263,7 +283,28 @@ const Model = struct {
             }
         }
 
-        return .{
+        // Draw the dialog on top if it's visible
+        if (self.show_new_card_dialog and self.new_card_dialog != null) {
+            // Create a border around the dialog
+            const border = Border{
+                .child = self.new_card_dialog.?.widget(),
+                .style = .{},
+            };
+
+            // Draw the bordered dialog
+            const dialog_surface = try border.draw(ctx);
+
+            // Center the dialog on screen
+            const width = dialog_surface.size.width;
+            const height = dialog_surface.size.height;
+            const start_row = @max(0, @divFloor(@as(usize, size.height - height), 2));
+            const start_col = @max(0, @divFloor(@as(usize, size.width - width), 2));
+
+            try surfaces.append(.{ .origin = .{ .row = @intCast(start_row), .col = @intCast(start_col) }, .surface = dialog_surface });
+        }
+
+        // Create the surface with all the child surfaces
+        return vxfw.Surface{
             .size = ctx.max.size(),
             .widget = self.widget(),
             .buffer = &.{},
@@ -277,6 +318,9 @@ const Model = struct {
 
         self.freeListUserData();
         self.lists.clearRetainingCapacity();
+
+        const old_col_idx = self.col_idx;
+        const old_cursor = if (self.lists.items.len > 0) self.lists.items[old_col_idx].cursor else 0;
         self.col_idx = 0;
 
         for (0..self.kanban.columns.items.len) |idx| {
@@ -289,6 +333,11 @@ const Model = struct {
                     .userdata = data,
                 } },
             });
+        }
+
+        if (old_col_idx < self.kanban.columns.items.len) {
+            self.col_idx = old_col_idx;
+            self.lists.items[self.col_idx].cursor = old_cursor;
         }
     }
 
@@ -303,12 +352,137 @@ const Model = struct {
         self.kanban.deinit();
         self.freeListUserData();
         self.lists.deinit();
+
+        if (self.new_card_dialog) |dialog| {
+            dialog.deinit();
+            self.allocator.destroy(dialog);
+        }
     }
 };
 
 const ListData = struct {
     col_idx: usize,
     model: *Model,
+};
+
+const NewCardDialog = struct {
+    title_field: TextField,
+    model: *Model,
+    allocator: std.mem.Allocator,
+    card_title: []u8 = &[_]u8{},
+
+    pub fn init(model: *Model) !NewCardDialog {
+        // Initialize with the required allocator and unicode data
+        return NewCardDialog{
+            .title_field = TextField.init(model.allocator, model.unicode_data),
+            .model = model,
+            .allocator = model.allocator,
+        };
+    }
+
+    pub fn deinit(self: *NewCardDialog) void {
+        // Clean up the text field
+        self.title_field.deinit();
+    }
+
+    pub fn widget(self: *NewCardDialog) vxfw.Widget {
+        return .{
+            .userdata = self,
+            .eventHandler = NewCardDialog.eventHandler,
+            .drawFn = NewCardDialog.drawFn,
+        };
+    }
+
+    fn eventHandler(ptr: *anyopaque, ctx: *vxfw.EventContext, event: vxfw.Event) anyerror!void {
+        const self: *NewCardDialog = @ptrCast(@alignCast(ptr));
+
+        // Handle Enter key for submission manually to avoid conflicts
+        if (event == .key_press) {
+            const key = event.key_press;
+            if (key.codepoint == Key.enter) {
+                // Get the current text from the text field
+                const title = try self.title_field.toOwnedSlice();
+                defer self.allocator.free(title);
+
+                if (title.len > 0) {
+                    // Submit the title
+                    try insertCard(self.model.file_path, self.model.col_idx, title);
+                    try self.model.load_file(self.model.file_path);
+                    self.model.show_new_card_dialog = false;
+                    try ctx.requestFocus(self.model.widget());
+                    return ctx.consumeAndRedraw();
+                }
+            } else if (key.codepoint == Key.escape) {
+                // Cancel
+                self.model.show_new_card_dialog = false;
+                try ctx.requestFocus(self.model.widget());
+                return ctx.consumeAndRedraw();
+            }
+        }
+
+        // Pass all other events to the text field
+        return self.title_field.handleEvent(ctx, event);
+    }
+
+    fn drawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Error!vxfw.Surface {
+        const self: *NewCardDialog = @ptrCast(@alignCast(ptr));
+
+        const width = 36; // Width of the dialog content (will get +2 from border)
+        const height = 5; // Height of the dialog content (will get +2 from border)
+
+        // Create a surface for the dialog
+        var dialog = try vxfw.Surface.init(
+            ctx.arena,
+            self.widget(),
+            .{ .width = width, .height = height },
+        );
+
+        // Create a surface for the children
+        var surfaces = std.ArrayList(vxfw.SubSurface).init(ctx.arena);
+
+        // Create a text widget for the title
+        const title_text = vxfw.Text{
+            .text = "New Card",
+            .style = .{ .fg = .{ .rgb = [_]u8{ 255, 255, 255 } } },
+        };
+
+        // Add the title
+        try surfaces.append(.{
+            .origin = .{ .row = 0, .col = @intCast((width - "New Card".len) / 2) },
+            .surface = try title_text.draw(ctx.withConstraints(
+                ctx.min,
+                .{ .width = width, .height = 1 },
+            )),
+        });
+
+        // Add the text field
+        try surfaces.append(.{
+            .origin = .{ .row = 2, .col = 2 },
+            .surface = try self.title_field.draw(ctx.withConstraints(
+                ctx.min,
+                .{ .width = width - 4, .height = 1 },
+            )),
+        });
+
+        // Add help text
+        const help_text = vxfw.Text{
+            .text = "Enter: Submit  Esc: Cancel",
+            .style = .{ .fg = .{ .rgb = [_]u8{ 200, 200, 200 } } },
+        };
+
+        try surfaces.append(.{
+            .origin = .{ .row = 4, .col = @intCast((width - "Enter: Submit  Esc: Cancel".len) / 2) },
+            .surface = try help_text.draw(ctx.withConstraints(
+                ctx.min,
+                .{ .width = width, .height = 1 },
+            )),
+        });
+
+        // Add all surfaces to the dialog
+        dialog.children = surfaces.items;
+
+        return dialog;
+    }
 };
 
 fn cardWidget(card: *kanban.Card, is_selected: bool) vxfw.Widget {
@@ -327,37 +501,37 @@ fn cardWidget(card: *kanban.Card, is_selected: bool) vxfw.Widget {
 
 fn cardWidgetDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Error!vxfw.Surface {
     const card: *Card = @ptrCast(@alignCast(ptr));
-    
+
     // Create the text widget for the card content
     const text = vxfw.Text{
         .text = try std.fmt.allocPrint(ctx.arena, "{s}\n", .{card.title}),
     };
-    
+
     // Create a border with default style
     const border = Border{
         .child = text.widget(),
         .style = .{}, // Default style
     };
-    
+
     // Draw the bordered text
     return try border.draw(ctx);
 }
 
 fn selectedCardWidgetDrawFn(ptr: *anyopaque, ctx: vxfw.DrawContext) std.mem.Allocator.Error!vxfw.Surface {
     const card: *Card = @ptrCast(@alignCast(ptr));
-    
+
     // Create the text widget for the card content with bright white text
     const text = vxfw.Text{
         .text = try std.fmt.allocPrint(ctx.arena, "{s}\n", .{card.title}),
         .style = .{ .fg = .{ .rgb = [_]u8{ 255, 255, 255 } } }, // Bright white text
     };
-    
+
     // Create a border with bright white style for selected items
     const border = Border{
         .child = text.widget(),
         .style = .{ .fg = .{ .rgb = [_]u8{ 255, 255, 255 } } }, // Bright white border
     };
-    
+
     // Draw the bordered text
     return try border.draw(ctx);
 }
@@ -395,7 +569,7 @@ const NEW_CARD =
     \\
     \\
     \\[[card]]
-    \\title = "new card"
+    \\title = "{s}"
     \\column = {d}
 ;
 
@@ -461,11 +635,11 @@ pub fn edit(
 }
 
 /// insert a new card in the currently selected column
-fn insertCard(file_path: []const u8, col_idx: usize) !void {
+fn insertCard(file_path: []const u8, col_idx: usize, title: []const u8) !void {
     const file = try std.fs.cwd().openFile(file_path, .{ .mode = .read_write });
     defer file.close();
     try file.seekFromEnd(0);
-    try std.fmt.format(file.writer(), NEW_CARD, .{col_idx});
+    try std.fmt.format(file.writer(), NEW_CARD, .{ title, col_idx });
 }
 
 // Init the file with a template if it doesn't exist
